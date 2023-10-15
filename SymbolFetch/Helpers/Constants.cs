@@ -15,7 +15,7 @@ namespace SymbolFetch.Helpers
         static Constants()
         {
             SymbolServer = @"Microsoft-Symbol-Server/10.0.10522.521";
-            DownloadFolder = @"c:\symbols";
+            DownloadFolder = @"D:\winsymbols";
             EnableBulkDownload = false;
         }
 

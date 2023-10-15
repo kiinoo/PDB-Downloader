@@ -4,9 +4,13 @@ using System.Collections.Generic;
 using System.ComponentModel;
 using System.Configuration;
 using System.Diagnostics;
+using System.DirectoryServices.Protocols;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.Security;
+using System.Security.Cryptography.X509Certificates;
+using System.Security.Policy;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -31,7 +35,7 @@ namespace SymbolFetch
                 this.PdbGuid = this.Path.Split("/"[0])[this.Path.Split("/"[0]).Length - 2];
                 this.IsCompressed = false;
             }
-            
+
             public void SetPath(string path)
             {
                 this.Path = path;
@@ -59,6 +63,7 @@ namespace SymbolFetch
             FileDownloadAttempting,
             FileDownloadStarted,
             FileDownloadStopped,
+            FileDownloadFailed,
             FileDownloadSucceeded,
 
             ProgressChanged
@@ -152,7 +157,7 @@ namespace SymbolFetch
             this.PackageSize = 4096;
             this.StopWatchCyclesAmount = 5;
             this.DeleteCompletedFilesAfterCancel = true;
-            this.DownloadLocation = !string.IsNullOrEmpty(Constants.DownloadFolder)? Constants.DownloadFolder: "C:\\symcache";
+            this.DownloadLocation = !string.IsNullOrEmpty(Constants.DownloadFolder) ? Constants.DownloadFolder : "C:\\symcache";
         }
         #endregion
 
@@ -186,7 +191,7 @@ namespace SymbolFetch
         {
             return ResourceDownloader.FormatSizeBinary(size, default_decimals);
         }
-        
+
         public static string FormatSizeBinary(Int64 size, Int32 decimals)
         {
             String[] sizes = { "B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB" };
@@ -297,7 +302,7 @@ namespace SymbolFetch
                         if (webResp.StatusCode == HttpStatusCode.OK)
                         {
                             string ignore = null;
-                            m_totalSize += ProcessFileSize(webResp, out ignore);                     
+                            m_totalSize += ProcessFileSize(webResp, out ignore);
                         }
                     }
 
@@ -318,7 +323,7 @@ namespace SymbolFetch
             path = ProbeWithUnderscore(path);
             var webReq = (HttpWebRequest)System.Net.WebRequest.Create(path);
             webReq.UserAgent = Constants.SymbolServer;
-            if(headVerb)
+            if (headVerb)
                 webReq.Method = "HEAD";
             return (HttpWebResponse)webReq.GetResponseNoException();
         }
@@ -330,7 +335,7 @@ namespace SymbolFetch
             var webReq = (HttpWebRequest)System.Net.WebRequest.Create(path);
             webReq.UserAgent = Constants.SymbolServer;
             return (HttpWebResponse)webReq.GetResponseNoException();
-        } 
+        }
 
         private long ProcessFileSize(HttpWebResponse webResp, out string filePath)
         {
@@ -351,20 +356,20 @@ namespace SymbolFetch
                 try
                 {
                     System.IO.FileInfo fInfo = new System.IO.FileInfo(file);
-                    if (fInfo.Exists)   
+                    if (fInfo.Exists)
                     {
                         length = fInfo.Length;
                         filePath = file;
                     }
                 }
-                catch(Exception ex)
+                catch (Exception ex)
                 {
                     WriteToLog(file, ex);
                 }
             }
             else
             {
-                int position= webResp.ResponseUri.PathAndQuery.IndexOf(".pdb");
+                int position = webResp.ResponseUri.PathAndQuery.IndexOf(".pdb");
                 string fileName = webResp.ResponseUri.PathAndQuery.Substring(1, position + 3);
                 if (!FailedFiles.ContainsKey(fileName))
                     FailedFiles.Add(fileName, " - No matching PDBs found - " + file);
@@ -387,7 +392,7 @@ namespace SymbolFetch
 
         private static string ProbeWithFilePointer(string path)
         {
-            int position  = path.LastIndexOf('/');
+            int position = path.LastIndexOf('/');
             path = path.Remove(position, (path.Length - position));
             path = path.Insert(path.Length, "/file.ptr");
             return path;
@@ -398,6 +403,10 @@ namespace SymbolFetch
             bgwDownloader.ReportProgress((int)InvokeType.EventRaiser, eventName);
         }
 
+        private static bool CheckValidationResult(object sender, X509Certificate certificate, X509Chain chain, SslPolicyErrors errors)
+        {
+            return true; //总是接受  
+        }
         private void downloadFile(Int32 fileNr)
         {
             bool headVerb = false;
@@ -406,7 +415,7 @@ namespace SymbolFetch
             fireEventFromBgw(Event.FileDownloadAttempting);
 
             FileInfo file = this.Files[fileNr];
-            
+
             Int64 size = 0;
 
             Byte[] readBytes = new Byte[this.PackageSize];
@@ -424,8 +433,31 @@ namespace SymbolFetch
 
             try
             {
-                webReq = (HttpWebRequest)System.Net.WebRequest.Create(downloadUrl);
+                if (downloadUrl.StartsWith("https", StringComparison.OrdinalIgnoreCase))
+                {
+                    //ServicePointManager.ServerCertificateValidationCallback = new RemoteCertificateValidationCallback(CheckValidationResult);
+                    webReq = (HttpWebRequest)System.Net.WebRequest.Create(downloadUrl);
+                    //webReq.ProtocolVersion = HttpVersion.Version11;
+                    System.Net.ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
+                }
+                else
+                {
+                    webReq = (HttpWebRequest)System.Net.WebRequest.Create(downloadUrl);
+                }
+
                 webReq.UserAgent = Constants.SymbolServer;
+                //webReq.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0";
+                WebHeaderCollection myWebHeaderCollection = webReq.Headers;
+
+                ////Add the Accept-Language header (for Danish) in the request.
+                //myWebHeaderCollection.Add("Accept-Language:zh-CN,zh;q=0.8,zh-TW;q=0.7,zh-HK;q=0.5,en-US;q=0.3,en;q=0.2\r\n");
+
+                ////Include English in the Accept-Langauge header. 
+                //myWebHeaderCollection.Add("Accept-Encoding", "gzip, deflate, br");
+                //myWebHeaderCollection.Add("Sec-Fetch-Dest", "document");
+                //myWebHeaderCollection.Add("Sec-Fetch-Mode", "navigate");
+                //myWebHeaderCollection.Add("Sec-Fetch-Site", "none");
+
                 webResp = (HttpWebResponse)webReq.GetResponseNoException();
                 if (webResp.StatusCode == HttpStatusCode.NotFound)
                 {
@@ -449,8 +481,20 @@ namespace SymbolFetch
                             FailedFiles.Add(file.Name, " - " + webResp.StatusCode + "  " + webResp.StatusDescription);
                     }
                 }
-                else if(webResp.StatusCode == HttpStatusCode.OK)
+                else if (webResp.StatusCode == HttpStatusCode.BadRequest)
+                {
+                    if (webResp.ResponseUri != null)
+                    {
+                        file.SetPath(webResp.ResponseUri.ToString());
+                        this.Files[fileNr] = file;
+                        downloadFile(fileNr);
+                        return;
+                    }
+                }
+                else if (webResp.StatusCode == HttpStatusCode.OK)
+                {
                     size = webResp.ContentLength;
+                }
 
             }
             catch (Exception ex)
@@ -461,7 +505,7 @@ namespace SymbolFetch
             if (webResp.StatusCode == HttpStatusCode.OK)
             {
                 Directory.CreateDirectory(dirPath);
-                
+
                 if (fileptr)
                 {
                     string filePath = dirPath + "\\" +
@@ -559,12 +603,15 @@ namespace SymbolFetch
                         {
                             HandleCompression(filePath);
                         }
-                       
+
                     }
                     if (!bgwDownloader.CancellationPending) { fireEventFromBgw(Event.FileDownloadSucceeded); }
-                }               
+                }
             }
-            fireEventFromBgw(Event.FileDownloadStopped);
+            else if (webResp.StatusCode == HttpStatusCode.BadRequest)
+                fireEventFromBgw(Event.FileDownloadFailed);
+            else
+                fireEventFromBgw(Event.FileDownloadStopped);
         }
 
         public static void WriteToLog(string fileName, Exception exc)
@@ -600,12 +647,12 @@ namespace SymbolFetch
             ProcessStartInfo startInfo = new ProcessStartInfo(m.Groups[1].Value, m.Groups[2].Value);
 
             startInfo.WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden;
-            
+
             startInfo.UseShellExecute = false;
             startInfo.Verb = "runas";
             startInfo.CreateNoWindow = true;
             process.StartInfo = startInfo;
-            
+
             try
             {
                 var started = process.Start();
@@ -712,7 +759,7 @@ namespace SymbolFetch
             }
         }
 
-        public Dictionary<string,string> FailedFiles = new Dictionary<string, string>();
+        public Dictionary<string, string> FailedFiles = new Dictionary<string, string>();
 
         public String LocalDirectory
         {

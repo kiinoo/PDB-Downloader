@@ -6,6 +6,7 @@ using System.IO;
 using System.Windows;
 using System.Windows.Input;
 using System.Linq;
+using System.ComponentModel;
 
 
 namespace SymbolFetch
@@ -47,6 +48,7 @@ namespace SymbolFetch
             downloader.ProgressChanged += new EventHandler(downloader_ProgressChanged);
             downloader.FileDownloadAttempting += new EventHandler(downloader_FileDownloadAttempting);
             downloader.FileDownloadStarted += new EventHandler(downloader_FileDownloadStarted);
+            downloader.FileDownloadStopped += new EventHandler(downloader_FileDownloadStopped);
             downloader.Completed += new EventHandler(downloader_Completed);
             downloader.CancelRequested += new EventHandler(downloader_CancelRequested);
             downloader.DeletingFilesAfterCancel += new EventHandler(downloader_DeletingFilesAfterCancel);
@@ -97,7 +99,7 @@ namespace SymbolFetch
                 }
                 else
                 {
-                    if(!downloader.FailedFiles.ContainsKey(item.ToString()))
+                    if (!downloader.FailedFiles.ContainsKey(item.ToString()))
                         downloader.FailedFiles.Add(item.ToString(), " - No Debug information in PE header");
                 }
             }
@@ -244,6 +246,14 @@ namespace SymbolFetch
             //lblSavingTo.Content = String.Format("Saving to {0}\\{1}", downloader.LocalDirectory, downloader.CurrentFile.Name);
         }
 
+        private void downloader_FileDownloadStopped(object sender, EventArgs e)
+        {
+            ProgressChangedEventArgs args = e as ProgressChangedEventArgs;
+            if (args != null)
+                lblStatus.Content = String.Format("Download failed! {0}", downloader.CurrentFile.Path);
+            //lblSavingTo.Content = String.Format("Saving to {0}\\{1}", downloader.LocalDirectory, downloader.CurrentFile.Name);
+        }
+
         private void downloader_Completed(object sender, EventArgs e)
         {
             lblStatus.Content = String.Format("Download complete, downloaded {0} file(s).", downloader.Files.Count);
@@ -262,13 +272,13 @@ namespace SymbolFetch
                 {
                     foreach (var item in downloader.FailedFiles)
                     {
-                        sr.WriteLine(DateTime.Now.ToString() + "   " +  item.Key + (!string.IsNullOrEmpty(item.Value) ? item.Value : " - Failure after probing"));
+                        sr.WriteLine(DateTime.Now.ToString() + "   " + item.Key + (!string.IsNullOrEmpty(item.Value) ? item.Value : " - Failure after probing"));
                     }
                 }
 
                 if (downloader.Files.Count > 1)
                 {
-                        MessageBox.Show("Some symbols could not be downloaded. Please check the log file for more info.", "Error");
+                    MessageBox.Show("Some symbols could not be downloaded. Please check the log file for more info.", "Error");
                 }
                 else
                     MessageBox.Show("Symbol could not be downloaded. Please check the log file for more info.", "Error");
